@@ -90,9 +90,11 @@ const App: React.FC = () => {
   const handleSendMessage = async (text: string, uploadedImage?: { data: string; mimeType: string }) => {
     if ((!text.trim() && !uploadedImage) || !currentSessionId) return;
 
-    const apiKey = process.env.API_KEY || (window as any).API_KEY;
+    // In a no-build environment, process.env is a polyfill or window variable
+    const apiKey = (window as any).process?.env?.API_KEY || (window as any).API_KEY;
+    
     if (!apiKey) {
-      alert("Missing API Key. Add it to Vercel Environment Variables as API_KEY.");
+      alert("Missing API Key. Zak-AI can't think without it. Add API_KEY to Vercel Env Vars.");
       return;
     }
 
