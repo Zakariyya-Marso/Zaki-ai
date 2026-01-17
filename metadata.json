@@ -1,0 +1,8 @@
+{
+  "name": "Zak-AI",
+  "description": "A genius-level assistant with a massive attitude. High-performance, unfiltered, and powered by Gemini 3 Flash.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

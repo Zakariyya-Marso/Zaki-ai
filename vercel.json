@@ -1,0 +1,18 @@
+
+{
+  "version": 2,
+  "cleanUrls": true,
+  "framework": null,
+  "installCommand": "npm install",
+  "build": {
+    "env": {
+      "API_KEY": "@api_key"
+    }
+  },
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}
