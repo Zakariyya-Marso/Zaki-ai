@@ -48,18 +48,22 @@
       import ReactDOM from 'react-dom/client';
       import App from './App.tsx';
 
-      // Polyfill process for the browser
-      window.process = window.process || { env: {} };
+      // Ensure process.env is defined for browser-side libraries
+      window.process = { env: {} };
       
       try {
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(
-          <React.StrictMode>
-            <App />
-          </React.StrictMode>
-        );
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+          const root = ReactDOM.createRoot(rootElement);
+          root.render(
+            <React.StrictMode>
+              <App />
+            </React.StrictMode>
+          );
+        }
       } catch (err) {
-        console.error("Failed to render Zak-AI:", err);
+        console.error("Zak-AI Initialization Error:", err);
+        document.body.innerHTML = `<div style="color: white; padding: 20px; background: #900;">Fatal Boot Error: ${err.message}</div>`;
       }
     </script>
 </body>
