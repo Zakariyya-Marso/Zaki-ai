@@ -24,6 +24,11 @@ const App: React.FC = () => {
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false); 
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // GitHub Pages Helper: API Key Management
+  const [apiKey, setApiKey] = useState<string>(() => {
+    return localStorage.getItem('zak_ai_api_key') || '';
+  });
+
   useEffect(() => {
     if (currentUser) {
       setIsInitialLoadDone(false);
@@ -61,10 +66,6 @@ const App: React.FC = () => {
         setCurrentSessionId(firstSession.id);
       }
       setIsInitialLoadDone(true);
-    } else {
-      setSessions([]);
-      setCurrentSessionId(null);
-      setIsInitialLoadDone(true);
     }
   }, [currentUser?.id]);
 
@@ -90,12 +91,18 @@ const App: React.FC = () => {
   const handleSendMessage = async (text: string, uploadedImage?: { data: string; mimeType: string }) => {
     if ((!text.trim() && !uploadedImage) || !currentSessionId) return;
 
-    // In a no-build environment, process.env is a polyfill or window variable
-    const apiKey = (window as any).process?.env?.API_KEY || (window as any).API_KEY;
+    let activeKey = apiKey || (window as any).process?.env?.API_KEY;
     
-    if (!apiKey) {
-      alert("Missing API Key. Zak-AI can't think without it. Add API_KEY to Vercel Env Vars.");
-      return;
+    if (!activeKey) {
+      const promptedKey = prompt("Zak-AI needs an API Key to function on GitHub Pages. Enter your Gemini API Key:");
+      if (promptedKey) {
+        localStorage.setItem('zak_ai_api_key', promptedKey);
+        setApiKey(promptedKey);
+        activeKey = promptedKey;
+      } else {
+        alert("No API Key, no genius. Get lost.");
+        return;
+      }
     }
 
     const userMsg: Message = {
@@ -114,53 +121,30 @@ const App: React.FC = () => {
 
     const lowerText = text.toLowerCase();
     const isImageCommand = lowerText.startsWith('/image');
-    const imageKeywords = ['draw', 'generate', 'create', 'paint', 'picture of', 'make an image'];
-    
-    const isImageGenerationRequest = !uploadedImage && (isImageCommand || 
-                          imageKeywords.some(kw => lowerText.includes(kw)));
+    const isImageGenerationRequest = !uploadedImage && (isImageCommand || ['draw', 'generate', 'create'].some(kw => lowerText.includes(kw)));
 
     setIsTyping(true);
     if (isImageGenerationRequest) setIsGeneratingImage(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      
+      const ai = new GoogleGenAI({ apiKey: activeKey });
       const modelName = isImageGenerationRequest ? 'gemini-2.5-flash-image' : 'gemini-3-pro-preview';
       const finalPrompt = isImageCommand ? text.replace(/^\/image\s*/i, '') : text;
-
-      const config: any = isImageGenerationRequest ? {
-        imageConfig: { aspectRatio: "1:1" },
-        temperature: 1.0,
-      } : {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.9,
-        tools: [{ googleSearch: {} }]
-      };
-
-      const contentsParts: any[] = [{ text: finalPrompt }];
-      if (uploadedImage) {
-        contentsParts.push({
-          inlineData: {
-            data: uploadedImage.data,
-            mimeType: uploadedImage.mimeType,
-          }
-        });
-      }
 
       const response = await ai.models.generateContent({
         model: modelName,
         contents: isImageGenerationRequest 
           ? [{ parts: [{ text: finalPrompt }] }] 
           : uploadedImage 
-            ? [{ parts: contentsParts }]
+            ? [{ parts: [{ text: finalPrompt }, { inlineData: { data: uploadedImage.data, mimeType: uploadedImage.mimeType } }] }]
             : [...(currentSession?.messages || []), userMsg].map(m => ({
                 role: m.role === 'assistant' ? 'model' : 'user',
                 parts: m.image ? [
-                  { text: m.content || 'Look at this, idiot:' },
+                  { text: m.content || 'Analyze this.' },
                   { inlineData: { data: m.image.split(',')[1], mimeType: m.image.split(';')[0].split(':')[1] } }
                 ] : [{ text: m.content }]
               })),
-        config: config,
+        config: isImageGenerationRequest ? { imageConfig: { aspectRatio: "1:1" } } : { systemInstruction: SYSTEM_INSTRUCTION, tools: [{ googleSearch: {} }] },
       });
 
       let assistantText = '';
@@ -169,44 +153,32 @@ const App: React.FC = () => {
 
       if (response.candidates?.[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
-          if (part.text) {
-            assistantText += part.text;
-          } else if (part.inlineData) {
-            assistantImage = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-          }
+          if (part.text) assistantText += part.text;
+          else if (part.inlineData) assistantImage = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         }
       }
 
       const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
       if (groundingChunks) {
-        sources = groundingChunks
-          .filter((chunk: any) => chunk.web)
-          .map((chunk: any) => ({
-            title: chunk.web.title,
-            uri: chunk.web.uri
-          }));
+        sources = groundingChunks.filter((c: any) => c.web).map((c: any) => ({ title: c.web.title, uri: c.web.uri }));
       }
 
       const assistantMsg: Message = {
         id: uuidv4(),
         role: 'assistant',
-        content: assistantText || (assistantImage ? '' : 'I processed your garbage request.'),
+        content: assistantText || (assistantImage ? '' : 'Done.'),
         image: assistantImage,
         sources: sources.length > 0 ? sources : undefined,
         timestamp: new Date(),
       };
 
-      setSessions(prev => prev.map(s => 
-        s.id === currentSessionId 
-          ? { ...s, messages: [...s.messages, assistantMsg] }
-          : s
-      ));
+      setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, messages: [...s.messages, assistantMsg] } : s));
     } catch (error) {
-      console.error('Zak-AI Error:', error);
+      console.error('Error:', error);
       const errorMsg: Message = {
         id: uuidv4(),
         role: 'assistant',
-        content: "Server's dead or you're doing something stupid again. Try again later, moron.",
+        content: "Something went wrong. Probably your fault.",
         timestamp: new Date(),
       };
       setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, messages: [...s.messages, errorMsg] } : s));
@@ -271,48 +243,38 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col relative min-w-0">
         <header className="h-16 border-b border-red-900/30 flex items-center px-4 md:px-6 bg-[#020617]/50 backdrop-blur-md z-10">
           <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 mr-2 md:hidden text-slate-400 hover:text-white">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
-          <div className="flex flex-col">
-            <h1 className="text-lg font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-tighter">
-              {currentSession?.title || 'Zak-AI'}
-            </h1>
+          <h1 className="text-lg font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-tighter">
+            {currentSession?.title || 'Zak-AI'}
+          </h1>
+          <div className="ml-auto flex gap-2">
+            <button 
+              onClick={() => { const k = prompt("Update API Key:", apiKey); if(k) { setApiKey(k); localStorage.setItem('zak_ai_api_key', k); } }}
+              className="text-[10px] uppercase font-black tracking-widest text-slate-500 hover:text-red-400"
+            >
+              Key
+            </button>
           </div>
         </header>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth pb-24 md:pb-8">
           {!currentSession || currentSession.messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-6 mt-12 md:mt-0 max-w-2xl mx-auto px-6">
-              <div className="relative">
-                <div className="absolute inset-0 bg-red-500/10 blur-3xl rounded-full" />
-                <div className="relative w-24 h-24 rounded-full bg-gradient-to-tr from-red-600 to-orange-600 flex items-center justify-center mb-2 shadow-2xl shadow-red-500/20 ring-4 ring-red-900/50">
-                  <span className="text-4xl font-black text-white italic tracking-tighter">ZAK</span>
-                </div>
+              <div className="relative w-24 h-24 rounded-full bg-gradient-to-tr from-red-600 to-orange-600 flex items-center justify-center mb-2 shadow-2xl ring-4 ring-red-900/50">
+                <span className="text-4xl font-black text-white italic tracking-tighter">ZAK</span>
               </div>
-              <div className="space-y-2">
-                <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">Welcome to the real world</h2>
-                <p className="text-slate-400 text-lg">Stop asking stupid questions and start doing something useful.</p>
-              </div>
+              <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">Zak-AI</h2>
+              <p className="text-slate-400 text-lg">Stop asking stupid questions and start doing something useful.</p>
             </div>
           ) : (
-            currentSession.messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
-            ))
+            currentSession.messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
           )}
           {isTyping && (
-            <div className="flex flex-col space-y-2">
-              <div className="flex space-x-2 p-4 bg-red-950/20 border border-red-900/20 rounded-2xl w-fit">
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-              </div>
-              <div className="flex items-center gap-2 ml-2">
-                 <span className="text-[10px] px-2 py-0.5 rounded-full font-black uppercase tracking-tighter bg-red-500/20 text-red-400 border border-red-500/30">
-                    Zak is thinking...
-                 </span>
-              </div>
+            <div className="flex space-x-2 p-4 bg-red-950/20 border border-red-900/20 rounded-2xl w-fit">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-bounce"></div>
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
             </div>
           )}
         </div>
