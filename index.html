@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,65 +5,142 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zak-AI | Unfiltered Genius</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Babel Standalone to compile TSX in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono&display=swap" rel="stylesheet">
     
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #020617; margin: 0; height: 100vh; overflow: hidden; }
+        body { font-family: 'Inter', sans-serif; background-color: #020617; margin: 0; height: 100vh; overflow: hidden; color: #e2e8f0; }
         .code-font { font-family: 'JetBrains Mono', monospace; }
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: #020617; }
-        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #ef4444; }
         #root { height: 100vh; width: 100vw; }
     </style>
 
     <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
-    "@google/genai": "https://esm.sh/@google/genai@0.2.1",
-    "uuid": "https://esm.sh/uuid@11.0.5",
-    "marked": "https://esm.sh/marked@15.0.7",
-    "prismjs": "https://esm.sh/prismjs@1.29.0",
-    "react/": "https://esm.sh/react@^19.2.3/"
-  }
-}
-</script>
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "@google/genai": "https://esm.sh/@google/genai@0.2.1",
+        "uuid": "https://esm.sh/uuid@9.0.0"
+      }
+    }
+    </script>
 </head>
-<body class="text-slate-200 selection:bg-red-500/30">
+<body>
     <div id="root"></div>
     
     <script type="text/babel" data-type="module">
-      import React from 'react';
+      import React, { useState, useRef, useEffect, useCallback } from 'react';
       import ReactDOM from 'react-dom/client';
-      import App from './App.tsx';
+      import { GoogleGenAI } from '@google/genai';
+      import { v4 as uuidv4 } from 'uuid';
 
-      // Ensure process.env is defined for browser-side libraries
-      window.process = { env: {} };
-      
-      try {
-        const rootElement = document.getElementById('root');
-        if (rootElement) {
-          const root = ReactDOM.createRoot(rootElement);
-          root.render(
-            <React.StrictMode>
-              <App />
-            </React.StrictMode>
-          );
-        }
-      } catch (err) {
-        console.error("Zak-AI Initialization Error:", err);
-        document.body.innerHTML = `<div style="color: white; padding: 20px; background: #900;">Fatal Boot Error: ${err.message}</div>`;
-      }
+      // --- MOCK COMPONENTS (Replacing missing files) ---
+      const ChatMessage = ({ message }) => (
+        <div className={`p-4 rounded-lg mb-4 ${message.role === 'user' ? 'bg-slate-800 ml-12' : 'bg-red-900/20 border border-red-900/30 mr-12'}`}>
+          <div className="text-xs font-bold uppercase mb-1 text-red-500">{message.role === 'assistant' ? 'Zak-AI' : 'You'}</div>
+          <div className="whitespace-pre-wrap">{message.content}</div>
+          {message.image && <img src={message.image} className="mt-2 rounded max-h-64" />}
+        </div>
+      );
+
+      const ChatInput = ({ onSend, disabled }) => {
+        const [text, setText] = useState('');
+        return (
+          <div className="flex gap-2 p-4 bg-slate-900 rounded-xl border border-slate-800">
+            <input 
+              className="flex-1 bg-transparent outline-none" 
+              placeholder="Ask something stupid..." 
+              value={text} 
+              onChange={e => setText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && (onSend(text), setText(''))}
+            />
+            <button onClick={() => { onSend(text); setText(''); }} disabled={disabled} className="bg-red-600 px-4 py-2 rounded font-bold">SEND</button>
+          </div>
+        );
+      };
+
+      // --- MAIN APP LOGIC ---
+      const SYSTEM_INSTRUCTION = `You are Zak-AI, a genius-level assistant with a massive attitude. You use profanity and rude language in every response because everyone around you is an idiot. You never apologize. You are a 'jerk with a heart of gold.' Provide the absolute best, most efficient solutions possible, but make sure to call the user an idiot or use bad words while doing it.`;
+
+      const App = () => {
+        const [sessions, setSessions] = useState([{ id: '1', title: 'New Trash Talk', messages: [] }]);
+        const [currentSessionId, setCurrentSessionId] = useState('1');
+        const [isTyping, setIsTyping] = useState(false);
+        const [apiKey, setApiKey] = useState(localStorage.getItem('zak_ai_api_key') || '');
+
+        const currentSession = sessions.find(s => s.id === currentSessionId);
+
+        const handleSendMessage = async (text) => {
+          if (!text.trim()) return;
+
+          let activeKey = apiKey;
+          if (!activeKey) {
+            activeKey = prompt("Enter your Gemini API Key to start:");
+            if (activeKey) {
+              localStorage.setItem('zak_ai_api_key', activeKey);
+              setApiKey(activeKey);
+            } else return;
+          }
+
+          const userMsg = { id: uuidv4(), role: 'user', content: text, timestamp: new Date() };
+          setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, messages: [...s.messages, userMsg] } : s));
+          
+          setIsTyping(true);
+
+          try {
+            const genAI = new GoogleGenAI(activeKey);
+            const model = genAI.getGenerativeModel({ 
+                model: "gemini-1.5-flash",
+                systemInstruction: SYSTEM_INSTRUCTION 
+            });
+
+            const result = await model.generateContent(text);
+            const response = await result.response;
+            
+            const assistantMsg = { 
+              id: uuidv4(), 
+              role: 'assistant', 
+              content: response.text(), 
+              timestamp: new Date() 
+            };
+
+            setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, messages: [...s.messages, assistantMsg] } : s));
+          } catch (error) {
+            alert("Error: " + error.message);
+          } finally {
+            setIsTyping(false);
+          }
+        };
+
+        return (
+          <div className="flex flex-col h-screen bg-[#020617]">
+            <header className="p-6 border-b border-red-900/30 flex justify-between items-center">
+              <h1 className="text-2xl font-black bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent italic">ZAK-AI</h1>
+              <button onClick={() => {localStorage.removeItem('zak_ai_api_key'); location.reload();}} className="text-xs text-slate-500">Reset Key</button>
+            </header>
+            
+            <div className="flex-1 overflow-y-auto p-4 max-w-4xl mx-auto w-full">
+              {currentSession.messages.length === 0 ? (
+                <div className="text-center mt-20 text-slate-500">
+                  <div className="text-6xl mb-4">🙄</div>
+                  <p>Don't just stare at me. Say something.</p>
+                </div>
+              ) : (
+                currentSession.messages.map(m => <ChatMessage key={m.id} message={m} />)
+              )}
+              {isTyping && <div className="text-red-500 animate-pulse font-bold">Zak is thinking of an insult...</div>}
+            </div>
+
+            <div className="p-4 max-w-4xl mx-auto w-full">
+              <ChatInput onSend={handleSendMessage} disabled={isTyping} />
+            </div>
+          </div>
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
     </script>
 </body>
 </html>
