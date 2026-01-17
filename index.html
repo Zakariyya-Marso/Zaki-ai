@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zak-AI | Unfiltered Genius</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Add Babel to compile TSX on the fly -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -53,6 +55,7 @@
     "react": "https://esm.sh/react@^19.2.3",
     "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
     "marked": "https://esm.sh/marked@^12.0.0",
     "prismjs": "https://esm.sh/prismjs@^1.29.0",
     "prismjs/": "https://esm.sh/prismjs@^1.30.0/"
@@ -62,5 +65,7 @@
 </head>
 <body class="text-slate-200 selection:bg-red-500/30">
     <div id="root"></div>
+    <!-- Load index.tsx as a babel script -->
+    <script type="text/babel" data-type="module" src="index.tsx"></script>
 </body>
 </html>

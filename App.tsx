@@ -90,6 +90,12 @@ const App: React.FC = () => {
   const handleSendMessage = async (text: string, uploadedImage?: { data: string; mimeType: string }) => {
     if ((!text.trim() && !uploadedImage) || !currentSessionId) return;
 
+    const apiKey = process.env.API_KEY || (window as any).API_KEY;
+    if (!apiKey) {
+      alert("Missing API Key. Add it to Vercel Environment Variables as API_KEY.");
+      return;
+    }
+
     const userMsg: Message = {
       id: uuidv4(),
       role: 'user',
@@ -115,7 +121,7 @@ const App: React.FC = () => {
     if (isImageGenerationRequest) setIsGeneratingImage(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey });
       
       const modelName = isImageGenerationRequest ? 'gemini-2.5-flash-image' : 'gemini-3-pro-preview';
       const finalPrompt = isImageCommand ? text.replace(/^\/image\s*/i, '') : text;
